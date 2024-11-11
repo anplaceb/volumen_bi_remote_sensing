@@ -1,0 +1,142 @@
+---
+title: "Einzelbaumvolumen_bi_vorbereitung"
+format: html
+editor: visual
+---
+
+## Einzelbaumvolumen BI Vorbereitung
+
+Prepare data. Load bi data for individual trees and add columns with info for later grouping in height groups, tree species and waldbauregion.
+
+Input: bi data
+
+Output: bi data classified in strata defined by height groups, tree species groups and waldbauregions
+
+```{r}
+#| echo: false
+library(here)
+library(data.table)
+library(dplyr)
+```
+
+Verteilung der Einzelbaumvolumina über verschiedene Straten.
+
+The BI data from Niedersachsen. The information is in different tables. Only select data from 2022 to be faster.
+
+```{r}
+bi_hoehe_vol <- fread(here('input', 'tblDatPh2_Vorr_Calc_ZE_Volumen.csv'), dec=",")
+bi_hoehe_vol <- bi_hoehe_vol[bi_hoehe_vol$DatOrga_Key %like% "2022", ]
+
+bi_baumart <- fread(here('input', 'tblDatPh2_Vorr_ZE_Baumart.csv'), dec=",")
+bi_baumart <- bi_baumart[bi_baumart$DatOrga_Key %like% "2022", ]
+
+bi_wuchs <- fread(here('input', 'tblDatPh2_ZE_Lag_GIS_ExportTable.csv'), dec=",")
+bi_wuchs <- bi_wuchs[bi_wuchs$DatOrga_Key %like% "2022", ]
+```
+
+Filter trees: Only data from inner plot where big and small trees are measured. Only not Totholz is used. Genutzt is filtered. Horst and Hoehlen/Habitatbaum is filtered.
+
+```{r}
+bi_baumart <- bi_baumart %>% filter(DatPh2_Vorr_Abstand < 600) %>%
+                            filter(DatPh2_Vorr_BA %% 100 != 0) %>% 
+                            filter(DatPh2_Vorr_Art != 1 ) %>% 
+                            filter(DatPh2_Vorr_NatSch_1 != 1, DatPh2_Vorr_NatSch_1 != 2,  DatPh2_Vorr_NatSch_2 != 1, DatPh2_Vorr_NatSch_2 != 2 )
+```
+
+Select needed columns
+
+```{r}
+bi_hoehe_vol_col <- bi_hoehe_vol %>% select("DatOrga_Key", "DatPh2_KSPNr" , "DatPh2_Vorr_ID", "DatPh2_Vorr_Calc_Hoehe" , "DatPh2_Vorr_Calc_Vol" )
+
+bi_baumart_col <- bi_baumart %>% select("DatOrga_Key", "DatPh2_KSPNr" , "DatPh2_Vorr_ID", "DatPh2_Vorr_BA" )
+
+bi_wuchs_col <- bi_wuchs %>% select("DatOrga_Key", "DatPh2_KSPNr" , "WBR", "WG", "WB", "WBR_NAME", "WBZ_NAME", "WUGB_NA")
+```
+
+(Or Leave all columns)
+
+```{r}
+#bi_hoehe_vol_col <- bi_hoehe_vol 
+#bi_baumart_col <- bi_baumart
+#bi_wuchs_col <- bi_wuchs %>% select("DatOrga_Key", "DatPh2_KSPNr" , "WBR", "WG", "WB", "WBR_NAME", "WBZ_NAME", "WUGB_NA")
+```
+
+Create unique ID for merge
+
+```{r}
+bi_hoehe_vol_col$ID <- paste(bi_hoehe_vol_col$DatPh2_KSPNr, "-",    bi_hoehe_vol_col$DatPh2_Vorr_ID, sep="")
+ 
+bi_baumart_col$ID <- paste(bi_baumart_col$DatPh2_KSPNr, "-",    bi_baumart_col$DatPh2_Vorr_ID, sep="")
+```
+
+Merge table with height and volumen with table with species and select only needed columns. Remove not needed tables.
+
+```{r}
+bi_hoehe_vol_baumart <- bi_hoehe_vol_col[bi_baumart_col, on = "ID"]
+bi_hoehe_vol_baumart<- bi_hoehe_vol_baumart %>% select("DatOrga_Key", "ID", "DatPh2_KSPNr", "DatPh2_Vorr_Calc_Hoehe", "DatPh2_Vorr_Calc_Vol" , "DatPh2_Vorr_BA"   )
+rm(bi_hoehe_vol, bi_baumart, bi_wuchs, bi_hoehe_vol_col, bi_baumart_col)
+```
+
+Merge table with height, volumen and species with table with waldbauregionen, wuchsbezirke und wuchsgebiete
+
+```{r}
+bi_hoehe_vol_baumart_wuchs <- bi_hoehe_vol_baumart[bi_wuchs_col, on = "DatPh2_KSPNr"]
+bi_hoehe_vol_baumart_wuchs <- bi_hoehe_vol_baumart_wuchs %>% select(-"i.DatOrga_Key")
+```
+
+The strata are defined by height groups, tree species groups and waldbauregionen
+
+Height groups:
+
+Jung 2-12, gering_baumholz \>12-21, mittl_baumholz \>21-30, stark_baumholz \>30
+
+```{r}
+bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_Calc_Hoehe <- bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_Calc_Hoehe/10 # heigth is in dm
+
+bi_hoehe_vol_baumart_wuchs <- bi_hoehe_vol_baumart_wuchs %>% mutate(height_group = case_when(
+  DatPh2_Vorr_Calc_Hoehe >=2 & DatPh2_Vorr_Calc_Hoehe <12 ~ "jung",
+  DatPh2_Vorr_Calc_Hoehe >=12 & DatPh2_Vorr_Calc_Hoehe <21 ~ "gering_baumholz",
+  DatPh2_Vorr_Calc_Hoehe >=21 & DatPh2_Vorr_Calc_Hoehe <30 ~ "mittl_baumholz",
+  DatPh2_Vorr_Calc_Hoehe >=30 ~ "stark_baumholz"
+))
+  
+```
+
+Tree species
+
+eiche begins with 1
+
+buche + alh + aln begins with 2, 3, 4
+
+fichte + tanne begins with 5
+
+douglasie + kiefer + lärche begins with 6, 7, 8
+
+```{r}
+bi_hoehe_vol_baumart_wuchs <- bi_hoehe_vol_baumart_wuchs %>%
+  mutate(DatPh2_Vorr_BA= as.character(DatPh2_Vorr_BA)) %>%
+  mutate(treespecies_group = case_when(
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==1  ~ "eiche",
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==2 ~ "buche+alh+aln",
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==3 ~ "buche+alh+aln",
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==4 ~ "buche+alh+aln",
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==5 ~ "fichte+tanne",
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==6 ~ "dougl+kiefer+laerche",
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==7 ~ "dougl+kiefer+laerche",
+  substr(bi_hoehe_vol_baumart_wuchs$DatPh2_Vorr_BA,1L,1L) ==8 ~ "dougl+kiefer+laerche"
+))
+```
+
+```{r}
+head(bi_hoehe_vol_baumart_wuchs)
+```
+
+```{r}
+str(bi_hoehe_vol_baumart_wuchs)
+```
+
+Save table
+
+```{r}
+write.csv2(bi_hoehe_vol_baumart_wuchs, file=here("output", "bi_volumen_hoehe_baumart_wuchs.csv"), row.names = FALSE)
+```

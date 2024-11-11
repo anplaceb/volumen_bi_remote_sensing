@@ -1,0 +1,246 @@
+---
+title: "Einzelbaumvolumen_bi_strata"
+format: html
+editor: visual
+---
+
+## Einzelbaum Verteilung
+
+Calculate the average volumen of the bi trees inside the strata groups. Also plot the volumina from the different groups.
+
+Optional: Test if the difference in the mean volumen between the groups is significant and if it is, between each groups.
+
+Input: bi data classified in strata defined by height groups, tree species groups and waldbauregions
+
+Outputs: Excel with Einzelbaumvolumen in each strata group. Plots and statistic test results.
+
+```{r}
+#| echo: false
+library(here)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(ggstatsplot)
+library(tibble)
+```
+
+Load data created in script Einzelbaumvolumen_bi_vorbereitung
+
+```{r}
+bi_data <- fread(here("output", "bi_volumen_hoehe_baumart_wuchs.csv"), dec=",")
+bi_data <- bi_data[complete.cases(bi_data), ]
+
+```
+
+Rename columns
+
+```{r}
+bi_data <- bi_data %>% select("DatPh2_Vorr_Calc_Vol", "WBR_NAME", "height_group", "treespecies_group") %>% rename("vol_m3"= "DatPh2_Vorr_Calc_Vol","waldbauregion" = "WBR_NAME" )
+```
+
+Statistics in groups. Variables for grouping: height_group, treespecies_group, WBR_NAME
+
+```{r}
+statistics_height <- bi_data %>% 
+  group_by(height_group) %>% 
+  summarize(vol_mean = mean(vol_m3),
+            vol_median = median(vol_m3),
+            vol_q1 = quantile(vol_m3, 0.25),
+            vol_q3 = quantile(vol_m3, 0.75),
+            n_trees = n()) %>% 
+  ungroup()
+
+statistics_treespecies_group <- bi_data %>% 
+  group_by(treespecies_group) %>% 
+  summarize(vol_mean = mean(vol_m3),
+            vol_median = median(vol_m3),
+            vol_q1 = quantile(vol_m3, 0.25),
+            vol_q3 = quantile(vol_m3, 0.75),
+            n_trees = n()) %>% 
+  ungroup()
+
+statistics_waldbauregion <- bi_data %>% 
+  group_by(waldbauregion) %>% 
+  summarize(mean = mean(vol_m3),
+            vol_median = median(vol_m3),
+            vol_q1 = quantile(vol_m3, 0.25),
+            vol_q3 = quantile(vol_m3, 0.75),
+            n_trees = n()) %>% 
+  ungroup()
+
+statistics_height_tree_species <- bi_data %>% 
+  group_by(height_group, treespecies_group) %>% 
+   summarize(mean = mean(vol_m3),
+            vol_median = median(vol_m3),
+            vol_q1 = quantile(vol_m3, 0.25),
+            vol_q3 = quantile(vol_m3, 0.75),
+            sd = sd(vol_m3),
+            n_trees = n()) %>% 
+  ungroup() %>% 
+  mutate(error = qnorm(0.975)*sd/sqrt(n_trees), # calculate error
+         lower_bound = mean - error, 
+         upper_bound = mean + error #calculate lower and upper bounds of confidence interval
+)
+
+statistics_height_tree_species_waldbauregion <- bi_data %>% 
+  group_by(height_group, treespecies_group, waldbauregion) %>% 
+  summarize(mean = mean(vol_m3),
+            vol_median = median(vol_m3),
+            vol_q1 = quantile(vol_m3, 0.25),
+            vol_q3 = quantile(vol_m3, 0.75),
+            sd = sd(vol_m3),
+            n_trees = n()) %>% 
+  ungroup() %>% 
+  mutate(error = qnorm(0.975)*sd/sqrt(n_trees), # calculate error
+         lower_bound = mean - error, 
+         upper_bound = mean + error #calculate lower and upper bounds of confidence interval
+)
+```
+
+```{r}
+head(statistics_height_tree_species)
+```
+
+Save
+
+```{r}
+write.csv2(statistics_height, file=here("output", "statistic_bi_volumen_hoehe.csv"), row.names = FALSE)
+
+write.csv2(statistics_treespecies_group, file=here("output", "statistic_bi_volumen_treespecies.csv"), row.names = FALSE)
+
+write.csv2(statistics_waldbauregion, file=here("output", "statistic_bi_volumen_waldbauregion.csv"), row.names = FALSE)
+
+write.csv2(statistics_height_tree_species, file=here("output", "statistic_bi_volumen_hoehe_treespecies.csv"), row.names = FALSE)
+
+write.csv2(statistics_height_tree_species_waldbauregion, file=here("output", "statistic_bi_volumen_hoehe_treespecies_waldbauregion.csv"), row.names = FALSE)
+```
+
+## Boxplots
+
+Plot height
+
+```{r}
+ggplot(bi_data, aes(x=height_group, y=vol_m3, fill=height_group)) +
+  geom_boxplot(position=position_dodge(width=1), width=0.8) 
+```
+
+Plot tree species
+
+```{r}
+ggplot(bi_data, aes(x=treespecies_group, y=vol_m3, fill=treespecies_group)) +
+  geom_boxplot(position=position_dodge(width=1), width=0.8) 
+```
+
+Plot Waldbauregion
+
+```{r}
+ggplot(bi_data, aes(x=waldbauregion, y=vol_m3, fill=waldbauregion)) +
+  geom_boxplot(position=position_dodge(width=1), width=0.8) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+height and tree species
+
+```{r}
+ggplot(bi_data, aes(x=height_group, y=vol_m3, fill=treespecies_group)) +
+  geom_boxplot(position=position_dodge(width=1), width=0.8) 
+```
+
+Only mittl. und stark Baumholz
+
+```{r}
+bi_data_hoch <- bi_data %>% filter(height_group %in% c("mittl_baumholz", "stark_baumholz"))
+
+ggplot(bi_data_hoch, aes(x=height_group, y=vol_m3, fill=treespecies_group)) +
+  geom_boxplot(position=position_dodge(width=1), width=0.8) 
+```
+
+```{r}
+ggplot(bi_data_hoch, aes(x=treespecies_group, y=vol_m3, fill=height_group)) +
+  geom_boxplot(position=position_dodge(width=1), width=0.8) 
+```
+
+```{r}
+ggplot(bi_data_hoch, aes(x=treespecies_group, y=vol_m3, fill=treespecies_group)) +
+  geom_boxplot(position=position_dodge(width=1), width=0.8) 
+```
+
+## Optional: Differences between the groups?
+
+```{r}
+library(ggstatsplot)
+library(tibble)
+
+# edit from here
+x <- "waldbauregion"
+cols <- 1 # the 4 continuous dependent variables
+type <- "non-parametric" # given the large number of observations, we use the parametric version
+paired <- FALSE # FALSE for independent samples, TRUE for paired samples
+# edit until here
+
+# edit at your own risk
+plotlist <-
+  purrr::pmap(
+    .l = list(
+      data = list(as_tibble(bi_data)),
+      x = x,
+      y = as.list(colnames(bi_data)[cols]),
+      plot.type = "box", # for boxplot
+      type = type, # parametric or nonparametric
+      pairwise.comparisons = TRUE, # to run post-hoc tests if more than 2 groups
+      pairwise.display = "significant", # show only significant differences
+      bf.message = FALSE, # remove message about Bayes Factor
+      centrality.plotting = FALSE # remove central measure
+    ),
+    .f = ifelse(paired, # automatically use ggwithinstats if paired samples, ggbetweenstats otherwise
+      ggstatsplot::ggwithinstats,
+      ggstatsplot::ggbetweenstats
+    ),
+    violin.args = list(width = 0, linewidth = 0) # remove violin plots and keep only boxplots
+  )
+
+# print all plots together with statistical results
+for (i in 1:length(plotlist)) {
+  print(plotlist[[i]])
+}
+
+```
+
+Differences between groups? (all classes)
+
+```{r}
+oneway.test(vol_m3 ~ height_group,
+  data = bi_data,
+  var.equal = FALSE # assuming unequal variances
+)
+
+oneway.test(vol_m3 ~ waldbauregion,
+  data = bi_data,
+  var.equal = FALSE # assuming unequal variances
+)
+
+oneway.test(vol_m3 ~ treespecies_group,
+  data = bi_data,
+  var.equal = FALSE # assuming unequal variances
+)
+```
+
+\
+Differences between two classes. Filter data first to mittl and stark baumholz because there is the most volumina. Wilcox test.
+
+```{r}
+library(rstatix)
+stat.test <- bi_data %>% 
+  filter(height_group == "mittl_baumholz" | height_group == "stark_baumholz") %>% 
+  rstatix::wilcox_test(vol_m3 ~ treespecies_group) %>%
+  add_significance()
+stat.test
+```
+
+Another option
+
+```{r}
+library(coin)
+bi_data %>%
+  filter(height_group == "mittl_baumholz" | height_group == "gering_baumholz") %>%
+  wilcox_effsize(vol_m3 ~ height_group)
+```

@@ -1,0 +1,95 @@
+---
+title: "Einzelbaumvolumen_calculate"
+format: html
+editor: visual
+---
+
+## Calculate Einzelbaumvolumen
+
+Classify the detected tree tops in the strata groups and calculate the volumen for each tree
+
+Input: ttops from remote sensing, wefl from FE and volumina from BI calculated in script 2
+
+Output: Einzelbäume with volumina calculated based on their strata
+
+```{r}
+#| echo: false
+library(sf)
+library(here)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+```
+
+Load detected tree tops
+
+```{r}
+ttops <- st_read(here("input", "ttops_ndom_solling_2023_bigger5m.gpkg"))
+```
+
+Classify trees in height groups
+
+```{r}
+ttops_height <- ttops %>% mutate(height_group = case_when(
+  Z >=2 & Z <12 ~ "jung",
+  Z >=12 & Z <21 ~ "gering_baumholz",
+  Z >=21 & Z <30 ~ "mittl_baumholz",
+  Z >=30 ~ "stark_baumholz"
+))
+rm(ttops)
+```
+
+Load FE data
+
+```{r}
+wefl <- st_read(here("input", "nifis_wefl_poly_fe_ma_neuhaus_dassel.gpkg"))
+wefl$STICHTAG <- as.character(wefl$STICHTAG)
+```
+
+Join welf data (polygon) to ttops (points) in order to have tree species
+
+```{r}
+join_ttops_wefl <- st_join(ttops_height, wefl)
+```
+
+Classify trees in tree species groups
+
+```{r}
+ttops_height_species <- join_ttops_wefl %>%
+  mutate(BANR= as.character(BANR)) %>%
+  mutate(treespecies_group = case_when(
+  substr(join_ttops_wefl$BANR,1L,1L) ==1  ~ "eiche",
+  substr(join_ttops_wefl$BANR,1L,1L) ==2 ~ "buche+alh+aln",
+  substr(join_ttops_wefl$BANR,1L,1L) ==3 ~ "buche+alh+aln",
+  substr(join_ttops_wefl$BANR,1L,1L) ==4 ~ "buche+alh+aln",
+  substr(join_ttops_wefl$BANR,1L,1L) ==5 ~ "fichte+tanne",
+  substr(join_ttops_wefl$BANR,1L,1L) ==6 ~ "dougl+kiefer+laerche",
+  substr(join_ttops_wefl$BANR,1L,1L) ==7 ~ "dougl+kiefer+laerche",
+  substr(join_ttops_wefl$BANR,1L,1L) ==8 ~ "dougl+kiefer+laerche"
+))
+```
+
+Load Einzelbaumvolumen from bi
+
+```{r}
+volumina <- fread(here('output', 'statistic_bi_volumen_hoehe_treespecies.csv'), dec=",")
+```
+
+Assign Einzelbaumvolumen to each tree depending on its group.
+
+In ttops_height_species_volumina each row is a tree
+
+```{r}
+ttops_height_species_volumina <-  ttops_height_species %>% left_join(volumina, by=c("height_group","treespecies_group"))
+ttops_height_species_volumina <- ttops_height_species_volumina %>% rename(vol_mean = mean) 
+```
+
+```{r}
+head(ttops_height_species_volumina)
+```
+
+Save point layer with ttops
+
+```{r}
+st_write(ttops_height_species_volumina, here("output", "ttops_height_species_volumina.gpkg"))
+```

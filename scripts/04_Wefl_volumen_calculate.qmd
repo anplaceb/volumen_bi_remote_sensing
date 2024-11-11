@@ -1,0 +1,109 @@
+---
+title: "Wefl_volumen_calculate"
+format: html
+editor: visual
+---
+
+## Calculate volumen inside wefl from Einzelbäume
+
+The volumina from the individual trees is aggregated for each wefl
+
+Input: individual trees with volumina and wefl polys\
+\
+Output: wefl layer with vol/ha. Plot aggregation in volumen groups
+
+```{r}
+library(dplyr)
+library(sf)
+library(here)
+library(ggplot2)
+```
+
+Load data Einzelbäume and wefl
+
+```{r}
+trees <- st_read(here("output", "ttops_height_species_volumina.gpkg"))
+wefl <- st_read(here("input", "nifis_wefl_poly_fe_ma_neuhaus_dassel.gpkg"))
+wefl$STICHTAG <- as.character(wefl$STICHTAG)
+```
+
+Select needed columns of trees
+
+```{r}
+trees <- trees %>% select(treeID, Z, height_group, OBJECTID.y, WEFLKZ, BESTANDESTYP_FLAECHE, GROESSEBESTAND, BESTOCKUNGSGRAD, BANR, BAUMALTER, VORRAT_JE_HA, VORNUTZMASSE_SUMME, Shape_Length,  Shape_Area,treespecies_group, vol_mean, vol_median, vol_q1, vol_q3, geom)
+```
+
+We need the volumen inside each WEFL as polygon, use st_join between wefl and trees, then summarize all tree volumina inside each wefl
+
+```{r}
+wefl_voltrees_poly <- st_join(wefl, trees) %>% rename(WEFLKZ = WEFLKZ.x)
+
+wefl_voltrees_poly_sum <- wefl_voltrees_poly  %>%  group_by(WEFLKZ) %>% 
+        summarize(vol_sum_trees_m3 = sum(vol_mean))
+
+wefl_voltrees_poly_sum_complete <- wefl_voltrees_poly_sum %>% filter(!is.na(wefl_voltrees_poly_sum$vol_sum_trees_m3))
+```
+
+Calculate volumen/ha. First calculate area
+
+```{r}
+wefl_voltrees_poly_sum_complete$area_ha <- st_area(wefl_voltrees_poly_sum_complete)/10000 
+
+wefl_voltrees_poly_sum_complete$vol_ha <- wefl_voltrees_poly_sum_complete$vol_sum_trees_m3 / wefl_voltrees_poly_sum_complete$area_ha
+
+st_write(wefl_voltrees_poly_sum_complete, here("output", "voltrees_bi_fernerk_wefl_sum.gpkg"))
+```
+
+```{r}
+head(wefl_voltrees_poly_sum_complete)
+```
+
+### Plot aggregation
+
+Define volume groups
+
+```{r}
+wefl_voltrees_poly_sum_complete <- wefl_voltrees_poly_sum_complete %>% mutate(vol_ha = as.numeric(vol_ha)) %>% 
+  mutate(vol_group = case_when(
+  vol_ha >=0 & vol_ha <50 ~ "0-50",
+  vol_ha >=50 & vol_ha <100 ~ "50-100",
+  vol_ha >=100 & vol_ha <200 ~ "100-200",
+  vol_ha >=200 & vol_ha <300 ~ "200-300",
+  vol_ha >=300 & vol_ha <400 ~ "300-400",
+  vol_ha >=400 & vol_ha <500 ~ "400-500",
+  vol_ha >=500 & vol_ha <600 ~ "500-600",
+  vol_ha >=600 & vol_ha <700 ~ "600-700",
+  vol_ha >=700 ~ "700-950"
+))
+```
+
+Summarize volumina inside volume groups
+
+```{r}
+sum_wefl_voltrees_poly_sum_complete <- wefl_voltrees_poly_sum_complete %>% 
+                                    group_by(vol_group) %>% 
+                                    summarize(vol_ha = sum(vol_ha)) %>% 
+                                    ungroup()
+```
+
+Calculate relative frequencies inside volume groups (how much % of m³/ha inside a volume group)
+
+```{r}
+sum_wefl_voltrees_poly_sum_complete <- sum_wefl_voltrees_poly_sum_complete %>%
+                                      mutate(perc = vol_ha/sum(vol_ha)*100 )
+
+sum_wefl_voltrees_poly_sum_complete$label = sprintf("%s \n (%s%%)", round(sum_wefl_voltrees_poly_sum_complete$vol_ha,0), round(sum_wefl_voltrees_poly_sum_complete$perc, 1))
+
+# In order to have the labels of the plot shown in the correct order, the levels of the factor must be manually defined
+sum_wefl_voltrees_poly_sum_complete$Position <- factor(sum_wefl_voltrees_poly_sum_complete$vol_group, levels =  c("0-50", "50-100", "100-200", "200-300", "300-400", "400-500",   "500-600", "600-700", "700-950"))
+```
+
+\
+Plot
+
+```{r}
+ggplot(sum_wefl_voltrees_poly_sum_complete, aes(Position, vol_ha, label = label)) +
+  geom_col() +
+  geom_text(size = 3, position = position_dodge(width = 1), vjust = -0.25) +  geom_col(fill = "darkturquoise") + xlab("Volumen group [m³/ha]") + ylab("Volumen [m³/ha]") + ylim(c(0,500000)) + ggtitle("Aggregated relative and aboslute volumina for Solling") + theme(plot.title = element_text(hjust = 0.5)) 
+
+```
